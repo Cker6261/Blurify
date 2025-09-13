@@ -8,6 +8,7 @@ import streamlit as st
 import tempfile
 import json
 import os
+import gc  # For garbage collection
 from pathlib import Path
 from PIL import Image
 import io
@@ -15,8 +16,6 @@ import time
 from typing import List, Optional
 
 # Setup D: drive cache before importing Blurify
-import os
-from pathlib import Path
 
 def setup_d_drive_cache():
     """Set up D: drive cache directories for ML models."""
@@ -37,6 +36,25 @@ def setup_d_drive_cache():
     os.environ['TMPDIR'] = str(temp_dir)
     os.environ['TEMP'] = str(temp_dir)
     os.environ['TMP'] = str(temp_dir)
+    
+    # Check system memory to set spaCy default
+    try:
+        import psutil
+        available_memory_gb = psutil.virtual_memory().available / (1024**3)
+        total_memory_gb = psutil.virtual_memory().total / (1024**3)
+        
+        # Enable spaCy by default if system has plenty of memory
+        if 'BLURIFY_DISABLE_SPACY' not in os.environ:
+            if total_memory_gb >= 8.0 and available_memory_gb >= 2.0:
+                os.environ['BLURIFY_DISABLE_SPACY'] = 'false'
+                st.sidebar.success(f"✅ Memory check: {total_memory_gb:.1f}GB total, {available_memory_gb:.1f}GB available")
+            else:
+                os.environ['BLURIFY_DISABLE_SPACY'] = 'true'  
+                st.sidebar.warning(f"⚠️ Limited memory: {total_memory_gb:.1f}GB total, {available_memory_gb:.1f}GB available")
+    except ImportError:
+        # Fallback: disable spaCy by default if psutil not available
+        if 'BLURIFY_DISABLE_SPACY' not in os.environ:
+            os.environ['BLURIFY_DISABLE_SPACY'] = 'true'
 
 # Setup cache before imports
 setup_d_drive_cache()
@@ -110,9 +128,16 @@ def initialize_components(config: BlurifyConfig) -> tuple:
             ocr_manager = OCRManager(config.ocr)
             st.success(f"✅ OCR initialized: {', '.join(ocr_manager.get_available_engines())}")
             
-            # Initialize PII detector
-            pii_detector = PIIDetector(config.detection)
-            st.success("✅ PII detector initialized")
+            # Initialize PII detector with memory error handling
+            try:
+                pii_detector = PIIDetector(config.detection)
+                if hasattr(pii_detector, 'spacy_detector') and pii_detector.spacy_detector and pii_detector.spacy_detector.nlp:
+                    st.success("✅ PII detector initialized (with spaCy name detection)")
+                else:
+                    st.warning("⚠️ PII detector initialized (regex-only mode - name detection disabled due to memory constraints)")
+            except Exception as e:
+                st.error(f"❌ Failed to initialize PII detector: {e}")
+                return None, None, None, None, None
             
             # Initialize visual detector (optional)
             visual_detector = None
@@ -144,6 +169,24 @@ def initialize_components(config: BlurifyConfig) -> tuple:
             return None, None, None, None, None
 
 
+def get_config_key(config: BlurifyConfig) -> str:
+    """Generate a unique key for the configuration to detect changes."""
+    import hashlib
+    
+    # Create a string representation of all config settings
+    config_str = f"{config.redaction.default_mode.value}_"
+    config_str += f"{sorted([pii.value for pii in config.detection.enabled_pii_types])}_"
+    config_str += f"{config.detection.confidence_threshold}_"
+    config_str += f"{config.ocr.primary_engine}_"
+    config_str += f"{config.ocr.enhance_preprocessing}_"
+    config_str += f"{config.redaction.blur_kernel_size}_"
+    config_str += f"{config.redaction.blur_sigma}_"
+    config_str += f"{config.detection.use_spacy}_"
+    config_str += f"{sorted([vt.value for vt in config.visual_detection.enabled_types])}"
+    
+    return hashlib.md5(config_str.encode()).hexdigest()[:8]
+
+
 def create_sidebar_config() -> BlurifyConfig:
     """Create configuration from sidebar inputs."""
     st.sidebar.header("🔧 Configuration")
@@ -152,28 +195,29 @@ def create_sidebar_config() -> BlurifyConfig:
     mode = st.sidebar.selectbox(
         "Redaction Mode",
         options=["blur", "mask"],
-        help="Choose how to redact detected PII"
+        help="Choose how to redact detected PII",
+        key="redaction_mode"
     )
     
     # PII types to detect
     st.sidebar.subheader("PII Types to Detect")
     pii_types = []
     
-    if st.sidebar.checkbox("📧 Email addresses", value=True):
+    if st.sidebar.checkbox("📧 Email addresses", value=True, key="pii_email"):
         pii_types.append(PIIType.EMAIL)
-    if st.sidebar.checkbox("📱 Phone numbers", value=True):
+    if st.sidebar.checkbox("📱 Phone numbers", value=True, key="pii_phone"):
         pii_types.append(PIIType.PHONE)
-    if st.sidebar.checkbox("👤 Person names", value=True):
+    if st.sidebar.checkbox("👤 Person names", value=True, key="pii_person"):
         pii_types.append(PIIType.PERSON_NAME)
-    if st.sidebar.checkbox("📅 Dates", value=True):
+    if st.sidebar.checkbox("📅 Dates", value=True, key="pii_date"):
         pii_types.append(PIIType.DATE)
-    if st.sidebar.checkbox("🆔 Aadhaar numbers", value=True):
+    if st.sidebar.checkbox("🆔 Aadhaar numbers", value=True, key="pii_aadhaar"):
         pii_types.append(PIIType.AADHAAR)
-    if st.sidebar.checkbox("💳 PAN numbers", value=True):
+    if st.sidebar.checkbox("💳 PAN numbers", value=True, key="pii_pan"):
         pii_types.append(PIIType.PAN)
-    if st.sidebar.checkbox("✍️ Signatures", value=False):
+    if st.sidebar.checkbox("✍️ Signatures", value=False, key="pii_signature"):
         pii_types.append(PIIType.SIGNATURE)
-    if st.sidebar.checkbox("📷 Photos/Faces", value=False):
+    if st.sidebar.checkbox("📷 Photos/Faces", value=False, key="pii_photo"):
         pii_types.append(PIIType.PHOTO)
     
     # Advanced settings
@@ -184,29 +228,66 @@ def create_sidebar_config() -> BlurifyConfig:
             max_value=1.0,
             value=0.7,
             step=0.1,
-            help="Minimum confidence for PII detection"
+            help="Minimum confidence for PII detection",
+            key="confidence_threshold"
         )
         
         ocr_engine = st.selectbox(
             "OCR Engine",
             options=["easyocr", "tesseract"],
-            help="Primary OCR engine to use"
+            help="Primary OCR engine to use",
+            key="ocr_engine"
         )
         
         blur_strength = st.slider(
             "Blur Strength",
-            min_value=5,
-            max_value=25,
-            value=15,
+            min_value=7,
+            max_value=51,
+            value=25,
             step=2,
-            help="Gaussian blur kernel size"
+            help="Gaussian blur kernel size (higher = more blur)",
+            key="blur_strength"
+        )
+        
+        blur_sigma = st.slider(
+            "Blur Sigma",
+            min_value=1.0,
+            max_value=15.0,
+            value=8.0,
+            step=0.5,
+            help="Gaussian blur sigma (higher = smoother blur)",
+            key="blur_sigma"
         )
         
         enable_visual = st.checkbox(
             "Enable Visual Detection",
             value=False,
-            help="Detect faces, signatures, and photos (experimental)"
+            help="Detect faces, signatures, and photos (experimental)",
+            key="enable_visual"
         )
+        
+        enhance_ocr = st.checkbox(
+            "Enhanced OCR Processing",
+            value=True,
+            help="✨ Apply image preprocessing to improve text detection quality",
+            key="enhance_ocr"
+        )
+        
+        # Default spaCy based on memory availability
+        spacy_default = os.environ.get('BLURIFY_DISABLE_SPACY', 'true').lower() == 'false'
+        
+        enable_spacy = st.checkbox(
+            "Enable Advanced Name Detection",
+            value=spacy_default,
+            help="✨ Use spaCy for better name detection (auto-enabled for systems with 8GB+ RAM)",
+            key="enable_spacy"
+        )
+        
+        # Update environment variable based on user choice
+        if enable_spacy:
+            os.environ['BLURIFY_DISABLE_SPACY'] = 'false'
+        else:
+            os.environ['BLURIFY_DISABLE_SPACY'] = 'true'
     
     # Create configuration
     config = BlurifyConfig()
@@ -215,8 +296,11 @@ def create_sidebar_config() -> BlurifyConfig:
     config.redaction.default_mode = RedactionMode(mode)
     config.detection.enabled_pii_types = pii_types
     config.detection.confidence_threshold = confidence_threshold
+    config.detection.use_spacy = enable_spacy  # Control spaCy usage
     config.ocr.primary_engine = ocr_engine
+    config.ocr.enhance_preprocessing = enhance_ocr  # OCR preprocessing
     config.redaction.blur_kernel_size = blur_strength
+    config.redaction.blur_sigma = blur_sigma
     
     if enable_visual:
         config.visual_detection.enabled_types = [PIIType.SIGNATURE, PIIType.PHOTO]
@@ -229,18 +313,35 @@ def create_sidebar_config() -> BlurifyConfig:
 def process_single_pdf_page(page_path, page_num, ocr_manager, pii_detector, visual_detector, redactor, config):
     """Process a single PDF page with memory-conscious approach."""
     try:
-        # Resize image more aggressively for multi-page processing
+        # Smart resizing: Balance between OCR quality and memory usage
         with Image.open(page_path) as img:
             original_size = img.size
             
-            # Use smaller max dimension for multi-page to save memory
-            max_dimension = 1000  # Smaller than single page processing
+            # Calculate optimal size based on text density requirements
+            # Higher DPI images can be resized more, lower DPI need to be preserved
+            pixel_count = img.size[0] * img.size[1]
+            
+            if pixel_count > 4000000:  # Images larger than ~4MP
+                # For very large images, resize to maintain text readability
+                max_dimension = 1800  # Increased from 1000 for better OCR
+            elif pixel_count > 2000000:  # Images 2-4MP  
+                max_dimension = 1600  # Good balance
+            elif pixel_count > 1000000:  # Images 1-2MP
+                max_dimension = 1400  # Minimal resize
+            else:
+                # Small images - don't resize to preserve text quality
+                max_dimension = max(img.size)
+            
             if max(img.size) > max_dimension:
                 ratio = max_dimension / max(img.size)
                 new_size = tuple(int(dim * ratio) for dim in img.size)
+                
+                # Use high-quality resampling for better text preservation
                 resized_img = img.resize(new_size, Image.Resampling.LANCZOS)
-                resized_img.save(page_path)
-                st.info(f"📐 Page {page_num}: Resized from {original_size} to {new_size}")
+                resized_img.save(page_path, quality=95, optimize=False)
+                st.info(f"📐 Page {page_num}: Smart resize {original_size} → {new_size} (OCR optimized)")
+            else:
+                st.info(f"📐 Page {page_num}: Size {original_size} preserved for optimal OCR")
         
         # OCR extraction
         try:
@@ -307,11 +408,31 @@ def process_single_pdf_page(page_path, page_num, ocr_manager, pii_detector, visu
             'engine_used': engine_used
         }
         
+        # Force garbage collection after processing each page
+        gc.collect()
+        
         return page_data
         
     except Exception as e:
         st.error(f"❌ Page {page_num}: Unexpected error - {str(e)}")
+        # Clean up on error
+        gc.collect()
         return None
+    finally:
+        # Always clean up memory
+        try:
+            if 'ocr_results' in locals():
+                del ocr_results
+            if 'text_detections' in locals():
+                del text_detections
+            if 'visual_detections' in locals():
+                del visual_detections
+            if 'all_detections' in locals():
+                del all_detections
+            if 'redacted_array' in locals():
+                del redacted_array
+        except:
+            pass
 
 
 def process_uploaded_file(uploaded_file, components, config) -> Optional[tuple]:
@@ -359,12 +480,19 @@ def process_uploaded_file(uploaded_file, components, config) -> Optional[tuple]:
             
             st.info(f"📄 Processing {len(image_paths)} pages from PDF...")
             
-            # Process each page individually
+            # Create progress bar and status container
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Process each page individually with better progress tracking
             for page_idx, page_path in enumerate(image_paths):
                 page_num = page_idx + 1
+                progress = page_idx / len(image_paths)
                 
                 try:
-                    st.info(f"🔄 Processing page {page_num} of {len(image_paths)}...")
+                    # Update progress
+                    progress_bar.progress(progress)
+                    status_text.info(f"🔄 Processing page {page_num} of {len(image_paths)}...")
                     
                     # Process single page with memory-conscious approach
                     page_result = process_single_pdf_page(
@@ -375,17 +503,21 @@ def process_uploaded_file(uploaded_file, components, config) -> Optional[tuple]:
                     if page_result:
                         all_pages_data.append(page_result)
                         total_detections += len(page_result['detections'])
-                        st.success(f"✅ Page {page_num}: {len(page_result['detections'])} PII items found and redacted")
+                        status_text.success(f"✅ Page {page_num}: {len(page_result['detections'])} PII items found and redacted")
                     else:
-                        st.warning(f"⚠️ Page {page_num}: Processing failed, skipping")
+                        status_text.warning(f"⚠️ Page {page_num}: Processing failed, skipping")
                     
-                    # Force garbage collection after each page
-                    import gc
+                    # Force garbage collection and brief pause to maintain connection
                     gc.collect()
+                    time.sleep(0.1)  # Small pause to prevent overwhelming Streamlit
                     
                 except Exception as e:
-                    st.error(f"❌ Page {page_num}: {str(e)}")
+                    status_text.error(f"❌ Page {page_num}: {str(e)}")
                     continue
+            
+            # Complete progress bar
+            progress_bar.progress(1.0)
+            status_text.success(f"🎉 Processing complete!")
             
             if not all_pages_data:
                 st.error("Failed to process any pages from the PDF.")
@@ -412,17 +544,30 @@ def process_uploaded_file(uploaded_file, components, config) -> Optional[tuple]:
             with Image.open(process_path) as test_img:
                 st.success(f"✅ Image loaded: {test_img.size} pixels")
                 
-                # Resize image if too large to prevent memory issues
-                max_dimension = 1600
+                # Smart resize for single images - preserve more quality for OCR
+                pixel_count = test_img.size[0] * test_img.size[1]
+                
+                if pixel_count > 8000000:  # Very large images (8MP+)
+                    max_dimension = 2400  # Higher than before for better OCR
+                elif pixel_count > 4000000:  # Large images (4-8MP)
+                    max_dimension = 2000  # Good balance
+                elif pixel_count > 2000000:  # Medium images (2-4MP)
+                    max_dimension = 1800  # Minimal resize
+                else:
+                    # Smaller images - preserve original size for best OCR
+                    max_dimension = max(test_img.size)
+                
                 if max(test_img.size) > max_dimension:
                     # Calculate new size maintaining aspect ratio
                     ratio = max_dimension / max(test_img.size)
                     new_size = tuple(int(dim * ratio) for dim in test_img.size)
                     
-                    # Resize and save back
+                    # Use high-quality resize for better text preservation
                     resized_img = test_img.resize(new_size, Image.Resampling.LANCZOS)
-                    resized_img.save(process_path)
-                    st.info(f"📐 Resized image from {test_img.size} to {new_size} to optimize memory usage")
+                    resized_img.save(process_path, quality=95, optimize=False)
+                    st.info(f"📐 Optimized resize: {test_img.size} → {new_size} (OCR quality preserved)")
+                else:
+                    st.info(f"📐 Image size {test_img.size} preserved for optimal OCR quality")
                     
         except Exception as e:
             st.error(f"Cannot read image file: {str(e)}")
@@ -748,6 +893,61 @@ def display_multipage_results(all_pages_data, processing_time, summary_data):
             st.button("📥 Download All Redacted Pages as ZIP (Error)", disabled=True)
     
     with col2:
+        # Create PDF file with all redacted pages
+        try:
+            pdf_data = None
+            redacted_pages = [p for p in all_pages_data if p['redacted_image']]
+            
+            if redacted_pages:
+                from PIL import Image
+                import tempfile
+                
+                pdf_buffer = io.BytesIO()
+                
+                # Convert all redacted images to a single PDF
+                if len(redacted_pages) == 1:
+                    # Single page PDF
+                    redacted_pages[0]['redacted_image'].save(pdf_buffer, format='PDF')
+                else:
+                    # Multi-page PDF
+                    first_page = redacted_pages[0]['redacted_image']
+                    other_pages = [p['redacted_image'] for p in redacted_pages[1:]]
+                    
+                    # Convert to RGB if needed (PDF requires RGB)
+                    if first_page.mode != 'RGB':
+                        first_page = first_page.convert('RGB')
+                    
+                    rgb_pages = []
+                    for page in other_pages:
+                        if page.mode != 'RGB':
+                            page = page.convert('RGB')
+                        rgb_pages.append(page)
+                    
+                    first_page.save(pdf_buffer, format='PDF', save_all=True, append_images=rgb_pages)
+                
+                pdf_data = pdf_buffer.getvalue()
+                
+                st.download_button(
+                    label="📄 Download as PDF",
+                    data=pdf_data,
+                    file_name="redacted_document.pdf",
+                    mime="application/pdf",
+                    help=f"Download PDF containing {len(redacted_pages)} redacted pages",
+                    key="download_pdf"
+                )
+            else:
+                st.info("No pages to generate PDF")
+                
+        except Exception as e:
+            st.error(f"Failed to create PDF file: {str(e)}")
+            st.button("📄 Download as PDF (Error)", disabled=True)
+    
+    # Metadata section
+    st.subheader("📊 Processing Metadata")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
         # Create combined metadata for all pages
         combined_metadata = {
             "total_pages": summary_data['total_pages'],
@@ -901,11 +1101,28 @@ def main():
     # Sidebar configuration
     config = create_sidebar_config()
     
-    # Initialize components
+    # Initialize components - reinitialize if config changed
+    current_config_key = get_config_key(config)
+    
+    # Check if we need to reinitialize components
+    reinitialize = False
     if 'components' not in st.session_state:
+        reinitialize = True
+        st.info("🔧 Initializing Blurify components...")
+    elif 'last_components_config' not in st.session_state or st.session_state.last_components_config != current_config_key:
+        reinitialize = True
+        st.info("⚙️ Settings changed - reinitializing components...")
+    
+    if reinitialize:
         with st.spinner("Initializing Blurify components..."):
             components = initialize_components(config)
-            st.session_state.components = components
+            if components and any(comp is not None for comp in components):
+                st.session_state.components = components
+                st.session_state.last_components_config = current_config_key
+                st.success("✅ Components initialized successfully")
+            else:
+                st.error("❌ Failed to initialize components")
+                st.stop()
     else:
         components = st.session_state.components
     
@@ -926,16 +1143,30 @@ def main():
         if uploaded_file.size > max_size:
             st.error(f"File too large ({uploaded_file.size:,} bytes). Maximum size is {max_size:,} bytes (50MB).")
         else:
-            # Only clear previous results if this is actually a different file
+            # Check if file or configuration changed
             current_file_key = f"{uploaded_file.name}_{uploaded_file.size}"
+            current_config_key = get_config_key(config)
+            
+            # Initialize keys if not present
             if 'last_file_key' not in st.session_state:
                 st.session_state.last_file_key = current_file_key
+            if 'last_config_key' not in st.session_state:
+                st.session_state.last_config_key = current_config_key
             
-            # Clear results only if file changed
+            # Clear results if file OR configuration changed
+            clear_results = False
             if st.session_state.last_file_key != current_file_key:
-                if 'results' in st.session_state:
-                    del st.session_state.results
+                clear_results = True
                 st.session_state.last_file_key = current_file_key
+                st.info("🔄 File changed - results will be refreshed")
+                
+            if st.session_state.last_config_key != current_config_key:
+                clear_results = True
+                st.session_state.last_config_key = current_config_key
+                st.info("⚙️ Settings changed - results will be refreshed")
+            
+            if clear_results and 'results' in st.session_state:
+                del st.session_state.results
             
             # Process button
             if st.button("🚀 Process File", type="primary"):

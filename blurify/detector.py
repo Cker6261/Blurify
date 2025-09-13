@@ -142,25 +142,63 @@ class SpacyNERDetector(LoggerMixin):
         self._initialize_spacy()
     
     def _initialize_spacy(self) -> None:
-        """Initialize spaCy model."""
+        """Initialize spaCy model with safe memory handling."""
+        # Set spaCy to None by default to prevent crashes
+        self.nlp = None
+        
         try:
             import spacy
+            import gc
+            import os
             
-            # Try to load the specified model
+            # Try to check available memory if psutil is available
             try:
-                self.nlp = spacy.load(self.config.spacy_model)
-                self.log_info(f"Loaded spaCy model: {self.config.spacy_model}")
-            except OSError:
-                self.log_warning(f"Model {self.config.spacy_model} not found, trying en_core_web_sm")
+                import psutil
+                available_memory_gb = psutil.virtual_memory().available / (1024**3)
+                if available_memory_gb < 1.0:  # Need at least 1GB free
+                    self.log_warning(f"Insufficient memory ({available_memory_gb:.1f}GB available). spaCy disabled to prevent system instability.")
+                    return
+                self.log_info(f"Memory check: {available_memory_gb:.1f}GB available")
+            except ImportError:
+                self.log_info("psutil not available, skipping memory check")
+            
+            # Force garbage collection before loading memory-intensive model
+            gc.collect()
+            
+            # Check if user explicitly disabled spaCy
+            if os.environ.get('BLURIFY_DISABLE_SPACY', '').lower() == 'true':
+                self.log_info("spaCy disabled via environment variable BLURIFY_DISABLE_SPACY")
+                return
+            
+            self.log_info("Attempting to load spaCy model...")
+            
+            # Try to load with very minimal components and catch ALL exceptions
+            try:
+                # Load with absolute minimal components to reduce memory usage
+                self.nlp = spacy.load(
+                    self.config.spacy_model, 
+                    exclude=["parser", "tagger", "lemmatizer", "textcat", "custom"]
+                )
+                self.log_info(f"✅ Loaded spaCy model: {self.config.spacy_model} (minimal)")
+            except Exception as e:
+                self.log_warning(f"Failed to load {self.config.spacy_model}: {str(e)}")
                 try:
-                    self.nlp = spacy.load("en_core_web_sm")
-                    self.log_info("Loaded fallback model: en_core_web_sm")
-                except OSError:
-                    self.log_warning("No spaCy models found. Please install with: python -m spacy download en_core_web_sm")
+                    # Fallback to en_core_web_sm with minimal components
+                    self.nlp = spacy.load(
+                        "en_core_web_sm", 
+                        exclude=["parser", "tagger", "lemmatizer", "textcat", "custom"]
+                    )
+                    self.log_info("✅ Loaded fallback: en_core_web_sm (minimal)")
+                except Exception as fallback_error:
+                    self.log_warning(f"spaCy fallback failed: {str(fallback_error)}")
+                    self.log_info("📝 Name detection disabled - using regex-only mode for safety")
                     self.nlp = None
                     
-        except ImportError:
-            self.log_warning("spaCy not available. Install with: pip install spacy")
+        except ImportError as e:
+            self.log_warning(f"spaCy/psutil not available: {str(e)}")
+            self.nlp = None
+        except Exception as e:
+            self.log_warning(f"Unexpected error initializing spaCy: {str(e)}")
             self.nlp = None
     
     def detect(self, text: str) -> List[Tuple[PIIType, str, float, Tuple[int, int]]]:
@@ -315,12 +353,38 @@ class PIIDetector(LoggerMixin):
         """
         self.config = config
         
-        # Initialize sub-detectors
-        self.regex_detector = RegexDetector()
-        self.spacy_detector = SpacyNERDetector(config)
-        self.presidio_detector = PresidioDetector(config) if config.use_presidio else None
+        # Initialize sub-detectors with error handling
+        try:
+            self.regex_detector = RegexDetector()
+            self.log_info("✅ Regex detector initialized")
+        except Exception as e:
+            self.log_error(f"Failed to initialize regex detector: {e}")
+            raise
         
-        self.log_info("PII detector initialized")
+        if config.use_spacy:
+            try:
+                self.spacy_detector = SpacyNERDetector(config)
+                if self.spacy_detector.nlp is None:
+                    self.log_warning("⚠️ spaCy detector initialized but model failed to load - name detection disabled")
+                else:
+                    self.log_info("✅ spaCy detector initialized")
+            except Exception as e:
+                self.log_warning(f"⚠️ spaCy detector failed to initialize: {e}")
+                # Create a dummy detector that won't crash the system
+                self.spacy_detector = None
+        else:
+            self.log_info("spaCy detector disabled by configuration")
+            self.spacy_detector = None
+        
+        try:
+            self.presidio_detector = PresidioDetector(config) if config.use_presidio else None
+            if self.presidio_detector:
+                self.log_info("✅ Presidio detector initialized")
+        except Exception as e:
+            self.log_warning(f"⚠️ Presidio detector failed to initialize: {e}")
+            self.presidio_detector = None
+        
+        self.log_info("PII detector initialization completed")
     
     def detect_in_text(self, text: str) -> List[DetectionResult]:
         """
@@ -347,17 +411,18 @@ class PIIDetector(LoggerMixin):
                     source="regex"
                 ))
         
-        # spaCy NER detection
-        spacy_results = self.spacy_detector.detect(text)
-        for pii_type, matched_text, confidence, (start, end) in spacy_results:
-            if pii_type in self.config.enabled_pii_types:
-                all_detections.append(DetectionResult(
-                    pii_type=pii_type,
-                    text=matched_text,
-                    bbox=(0, 0, 0, 0),  # Placeholder bbox
-                    confidence=confidence,
-                    source="spacy"
-                ))
+        # spaCy NER detection (if available)
+        if self.spacy_detector and self.spacy_detector.nlp is not None:
+            spacy_results = self.spacy_detector.detect(text)
+            for pii_type, matched_text, confidence, (start, end) in spacy_results:
+                if pii_type in self.config.enabled_pii_types:
+                    all_detections.append(DetectionResult(
+                        pii_type=pii_type,
+                        text=matched_text,
+                        bbox=(0, 0, 0, 0),  # Placeholder bbox
+                        confidence=confidence,
+                        source="spacy"
+                    ))
         
         # Presidio detection (if enabled)
         if self.presidio_detector:

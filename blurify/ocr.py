@@ -70,6 +70,45 @@ class OCREngine(LoggerMixin):
         except Exception as e:
             self.log_error(f"Failed to load image {image_path}: {e}")
             raise
+    
+    def _preprocess_for_ocr(self, image: np.ndarray) -> np.ndarray:
+        """
+        Preprocess image to improve OCR accuracy.
+        
+        Args:
+            image: Input image array
+            
+        Returns:
+            Preprocessed image array
+        """
+        try:
+            # Create a copy for processing
+            processed = image.copy()
+            
+            # Convert to grayscale for analysis
+            gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+            
+            # Enhance contrast using CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            enhanced = clahe.apply(gray)
+            
+            # Apply slight Gaussian blur to reduce noise
+            denoised = cv2.GaussianBlur(enhanced, (3, 3), 0)
+            
+            # Sharpen the image to make text clearer
+            kernel = np.array([[-1,-1,-1], 
+                             [-1, 9,-1], 
+                             [-1,-1,-1]])
+            sharpened = cv2.filter2D(denoised, -1, kernel)
+            
+            # Convert back to BGR for consistency
+            result = cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+            
+            return result
+            
+        except Exception as e:
+            self.log_warning(f"Preprocessing failed, using original image: {e}")
+            return image
 
 
 class EasyOCREngine(OCREngine):
@@ -148,15 +187,13 @@ class EasyOCREngine(OCREngine):
         image_array = self._load_image(image)
         
         try:
-            # Resize image to reduce memory usage
-            max_dimension = 1600  # Reduce from potentially large PDF pages
-            height, width = image_array.shape[:2]
-            if max(height, width) > max_dimension:
-                scale = max_dimension / max(height, width)
-                new_width = int(width * scale)
-                new_height = int(height * scale)
-                image_array = cv2.resize(image_array, (new_width, new_height))
-                self.log_info(f"Resized image from {width}x{height} to {new_width}x{new_height} to save memory")
+            # Apply preprocessing if enabled
+            if self.config.enhance_preprocessing:
+                image_array = self._preprocess_for_ocr(image_array)
+                self.log_info("Applied OCR preprocessing for better text detection")
+            
+            # Note: We removed the aggressive resizing here since we do smarter 
+            # resizing in the Streamlit app now. This preserves OCR quality.
             
             # EasyOCR expects RGB format
             if len(image_array.shape) == 3:
@@ -251,6 +288,11 @@ class TesseractEngine(OCREngine):
             raise RuntimeError("pytesseract not available")
         
         image_array = self._load_image(image)
+        
+        # Apply preprocessing if enabled
+        if self.config.enhance_preprocessing:
+            image_array = self._preprocess_for_ocr(image_array)
+            self.log_info("Applied OCR preprocessing for Tesseract")
         
         # Convert to PIL Image
         if len(image_array.shape) == 3:

@@ -36,6 +36,7 @@ class OCRConfig:
     languages: List[str] = field(default_factory=lambda: ["en"])
     confidence_threshold: float = 0.5
     tesseract_config: str = "--oem 3 --psm 6"
+    enhance_preprocessing: bool = True  # Apply image preprocessing for better OCR
 
 
 @dataclass
@@ -53,6 +54,7 @@ class DetectionConfig:
     )
     confidence_threshold: float = 0.7
     spacy_model: str = "en_core_web_sm"
+    use_spacy: bool = False  # Disabled by default to prevent memory issues
     use_presidio: bool = False
     presidio_threshold: float = 0.8
 

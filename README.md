@@ -7,13 +7,14 @@ Blurify automatically detects and redacts personally identifiable information (P
 ## ✨ Features
 
 - **🔒 Privacy-First**: All processing happens locally - no cloud APIs or external services
-- **📄 Multi-Format Support**: Handles images (JPG, PNG, TIFF, BMP) and PDFs
-- **🤖 Smart Detection**: Uses OCR + NLP to detect emails, phones, names, dates, and Indian IDs
-- **🎯 Multiple Redaction Modes**: Blur sensitive areas or mask with solid blocks
-- **⚡ Fast Processing**: Optimized for batch processing with configurable pipelines
-- **📊 Evaluation Metrics**: Built-in precision/recall/F1 scoring against ground truth
-- **🖥️ Multiple Interfaces**: Command-line tool and web UI
-- **🧪 Well Tested**: Comprehensive test suite with synthetic demo data
+- **📄 Multi-Format Support**: Handles images (JPG, PNG, TIFF, BMP) and PDFs with multi-page processing
+- **🤖 Smart Detection**: Enhanced OCR with preprocessing + NLP for better accuracy
+- **🎯 Multiple Redaction Modes**: High-quality blur or solid mask redaction
+- **📱 Real-time Settings**: Change detection types, OCR engines, blur strength on-the-fly
+- **� Flexible Output**: Download as individual images, ZIP archive, or reconstructed PDF
+- **🖥️ User-Friendly Web UI**: Streamlit interface with progress tracking and session management
+- **⚡ Memory Optimized**: Smart image resizing with automatic memory management
+- **🔧 Configurable**: Full control over OCR engines, confidence thresholds, and processing options
 
 ## 🔍 Supported PII Types
 
@@ -83,27 +84,31 @@ python -m spacy download en_core_web_sm
 
 ### Basic Usage
 
+#### 🌐 Web Interface (Recommended)
+```bash
+# Launch Streamlit web UI
+streamlit run streamlit_app.py
+
+# Open browser to http://localhost:8501
+```
+
+**Features:**
+- Upload images or multi-page PDFs
+- Real-time settings adjustment (PII types, OCR engine, blur strength)
+- Download results as PDF, ZIP, or individual images
+- Progress tracking and session management
+- Debug tools and system information
+
+#### 💻 Command Line Interface
 ```bash
 # Redact a single image with blur effect
-python -m blurify.cli --input demo_data/sample1.jpg --mode blur --output results/
+python -m blurify.cli --input document.jpg --mode blur --output results/
 
 # Redact a PDF with black masking
 python -m blurify.cli --input document.pdf --mode mask --output results/
 
 # Batch process a directory
 python -m blurify.cli --input images/ --output results/ --recursive
-
-# Run evaluation against ground truth
-python -m blurify.cli --eval --input demo_data/ --ground-truth demo_data/ground_truth.json
-```
-
-### Web Interface
-
-```bash
-# Launch Streamlit web UI
-streamlit run streamlit_app.py
-
-# Open browser to http://localhost:8501
 ```
 
 ## 📋 Command Line Options
@@ -310,7 +315,32 @@ Contributions welcome! Please:
 - **Improve evaluation metrics** and benchmarking
 - **Add support for more file formats** (DOCX, etc.)
 
-## 📄 License
+## � Recent Improvements
+
+### Version 2.0 Updates
+- **🧠 Smart Memory Management**: Automatic system memory detection with graceful fallbacks for spaCy NLP models
+- **⚡ Real-time Settings**: Configuration changes now apply immediately without restart - OCR engine switching, PII toggles work instantly  
+- **🔍 Enhanced OCR Quality**: Smart image preprocessing with CLAHE contrast enhancement, denoising, and sharpening for better text detection
+- **📐 Adaptive Image Resizing**: Intelligent scaling based on image size (8MP+ → 2400px, 4-8MP → 2000px) preserving text readability
+- **📑 Multi-page PDF Support**: Complete PDF reconstruction with processed pages, maintaining document structure
+- **💾 Flexible Output Options**: Export as individual images, ZIP archives, or reconstructed PDFs
+- **🎛️ Enhanced UI**: Progress tracking, memory status display, and real-time debug information
+
+### Performance Optimizations
+- **Memory-Safe Processing**: Prevents system crashes on low-memory devices (< 8GB RAM)
+- **Component Reinitialization**: Automatic OCR engine switching without application restart
+- **Smart Resource Management**: psutil integration for system monitoring and optimization
+
+### Bug Fixes
+- ✅ Fixed memory crashes from spaCy model loading
+- ✅ Resolved settings not applying (OCR engine selection, PII type toggles)  
+- ✅ Improved detection accuracy for phone numbers, emails, and names
+- ✅ Enhanced blur quality with better image processing pipeline
+- ✅ Stable multi-page PDF processing without memory issues
+
+---
+
+## �📄 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
