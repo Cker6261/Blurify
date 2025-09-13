@@ -4,6 +4,16 @@
 
 Blurify automatically detects and redacts personally identifiable information (PII) in documents without sending data to external services. Everything runs locally on your machine.
 
+## 👥 Contributors
+
+This project was developed by:
+- **Chirag Agrawal** 
+- **Milan Sharma**
+- **Nancy Dhiman** 
+- **Saksham Mann**
+
+*Built with passion for privacy and data protection* 🛡️
+
 ## ✨ Features
 
 - **🔒 Privacy-First**: All processing happens locally - no cloud APIs or external services
@@ -395,4 +405,19 @@ On a typical laptop (Intel i5, 8GB RAM):
 
 ---
 
-**Made with ❤️ for privacy-conscious document processing**
+## 🏆 Development Team
+
+**Blurify** was developed as part of the NASSCOM initiative by:
+
+| Team Member | Role | Contribution |
+|-------------|------|--------------|
+| **Chirag Agrawal** | Lead Developer | Core architecture, OCR integration, memory optimization |
+| **Milan Sharma** | Backend Developer | PII detection algorithms, NLP integration |
+| **Nancy Dhiman** | Frontend Developer | Streamlit UI, user experience design |
+| **Saksham Mann** | DevOps & Testing | System integration, performance optimization |
+
+*Committed to building privacy-first solutions for secure document processing* 🔐
+
+---
+
+**Made with ❤️ by Team Blurify for privacy-conscious document processing**
