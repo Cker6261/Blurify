@@ -150,6 +150,8 @@ def initialize_components(config: BlurifyConfig) -> tuple:
             
             # Initialize redactor
             redactor = Redactor(config.redaction)
+            # Reset synthetic data generator for new document session
+            redactor.reset_synthetic_session()
             st.success("✅ Redactor initialized")
             
             # Initialize PDF converter (optional)
@@ -194,8 +196,8 @@ def create_sidebar_config() -> BlurifyConfig:
     # Redaction mode
     mode = st.sidebar.selectbox(
         "Redaction Mode",
-        options=["blur", "mask"],
-        help="Choose how to redact detected PII",
+        options=["synthetic", "blur", "mask"],
+        help="Choose how to redact detected PII:\n• Synthetic: Replace with realistic fake data\n• Blur: Apply Gaussian blur effect\n• Mask: Cover with solid color",
         key="redaction_mode"
     )
     
@@ -259,6 +261,33 @@ def create_sidebar_config() -> BlurifyConfig:
             key="blur_sigma"
         )
         
+        # Synthetic replacement settings (only show if synthetic mode is selected)
+        if mode == "synthetic":
+            st.sidebar.subheader("🎭 Synthetic Data Settings")
+            
+            prefer_indian = st.sidebar.checkbox(
+                "Use Indian Names",
+                value=True,
+                help="Generate Indian names and context-appropriate data",
+                key="prefer_indian"
+            )
+            
+            preserve_formatting = st.sidebar.checkbox(
+                "Preserve Text Formatting",
+                value=True,
+                help="Try to maintain original text structure and spacing",
+                key="preserve_formatting"
+            )
+            
+            synthetic_seed = st.sidebar.number_input(
+                "Random Seed (optional)",
+                min_value=0,
+                max_value=999999,
+                value=0,
+                help="Set seed for reproducible synthetic data (0 = random)",
+                key="synthetic_seed"
+            )
+        
         enable_visual = st.checkbox(
             "Enable Visual Detection",
             value=False,
@@ -301,6 +330,13 @@ def create_sidebar_config() -> BlurifyConfig:
     config.ocr.enhance_preprocessing = enhance_ocr  # OCR preprocessing
     config.redaction.blur_kernel_size = blur_strength
     config.redaction.blur_sigma = blur_sigma
+    
+    # Apply synthetic replacement settings
+    if mode == "synthetic":
+        config.redaction.prefer_indian_names = st.session_state.get("prefer_indian", True)
+        config.redaction.preserve_formatting = st.session_state.get("preserve_formatting", True)
+        seed_value = st.session_state.get("synthetic_seed", 0)
+        config.redaction.synthetic_seed = seed_value if seed_value > 0 else None
     
     if enable_visual:
         config.visual_detection.enabled_types = [PIIType.SIGNATURE, PIIType.PHOTO]

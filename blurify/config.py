@@ -14,6 +14,7 @@ class RedactionMode(Enum):
     """Redaction rendering modes."""
     BLUR = "blur"
     MASK = "mask"
+    SYNTHETIC = "synthetic"  # Replace with realistic fake data
 
 
 class PIIType(Enum):
@@ -73,11 +74,16 @@ class VisualDetectionConfig:
 @dataclass
 class RedactionConfig:
     """Configuration for redaction rendering."""
-    default_mode: RedactionMode = RedactionMode.BLUR
+    default_mode: RedactionMode = RedactionMode.SYNTHETIC  # Changed default to synthetic
     blur_kernel_size: int = 15
     blur_sigma: float = 5.0
     mask_color: Tuple[int, int, int] = (0, 0, 0)  # RGB black
     padding_pixels: int = 5  # Extra padding around detected regions
+    
+    # Synthetic data generation settings
+    prefer_indian_names: bool = True  # Use Indian names for better local context
+    synthetic_seed: Optional[int] = None  # For reproducible synthetic data
+    preserve_formatting: bool = True  # Try to maintain original text formatting
 
 
 @dataclass

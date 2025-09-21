@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from .config import DetectionConfig, PIIType, DetectionResult
 from .ocr import OCRResult
 from .logger import LoggerMixin
+from .context_filter import PIIContextFilter
 
 
 @dataclass
@@ -384,6 +385,10 @@ class PIIDetector(LoggerMixin):
             self.log_warning(f"⚠️ Presidio detector failed to initialize: {e}")
             self.presidio_detector = None
         
+        # Initialize context filter for reducing false positives
+        self.context_filter = PIIContextFilter()
+        self.log_info("✅ Context filter initialized")
+        
         self.log_info("PII detector initialization completed")
     
     def detect_in_text(self, text: str) -> List[DetectionResult]:
@@ -440,8 +445,11 @@ class PIIDetector(LoggerMixin):
         # Remove duplicates and filter by confidence
         filtered_detections = self._deduplicate_detections(all_detections)
         
-        self.log_info(f"Detected {len(filtered_detections)} PII items in text")
-        return filtered_detections
+        # Apply context filtering to reduce false positives
+        context_filtered = self.context_filter.filter_detections(filtered_detections, text)
+        
+        self.log_info(f"Detected {len(context_filtered)} PII items in text (after context filtering)")
+        return context_filtered
     
     def detect_in_ocr_results(self, ocr_results: List[OCRResult]) -> List[DetectionResult]:
         """
@@ -479,8 +487,12 @@ class PIIDetector(LoggerMixin):
         # Remove duplicates and filter
         filtered_detections = self._deduplicate_detections(all_detections)
         
-        self.log_info(f"Detected {len(filtered_detections)} PII items in OCR results")
-        return filtered_detections
+        # Apply context filtering to reduce false positives
+        full_text = " ".join([ocr.text for ocr in ocr_results])
+        context_filtered = self.context_filter.filter_detections(filtered_detections, full_text)
+        
+        self.log_info(f"Detected {len(context_filtered)} PII items in OCR results (after context filtering)")
+        return context_filtered
     
     def _map_text_to_bbox(self, search_text: str, ocr_results: List[OCRResult]) -> Optional[Tuple[int, int, int, int]]:
         """

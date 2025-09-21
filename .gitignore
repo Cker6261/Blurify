@@ -87,6 +87,22 @@ test_output_*/
 .pytest_cache/
 .coverage
 
+# Test files and temporary results
+test_*.py
+*_test.py
+debug_output/
+test_output/
+output/
+temp/
+*_results/
+*_redacted.png
+*.png.bak
+
+# Dataset and sample files
+fake_dataset/
+Fake\ Data*/
+*.zip
+
 # Environment variables
 .env.local
 .env.development.local

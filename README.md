@@ -19,7 +19,7 @@ This project was developed by:
 - **🔒 Privacy-First**: All processing happens locally - no cloud APIs or external services
 - **📄 Multi-Format Support**: Handles images (JPG, PNG, TIFF, BMP) and PDFs with multi-page processing
 - **🤖 Smart Detection**: Enhanced OCR with preprocessing + NLP for better accuracy
-- **🎯 Multiple Redaction Modes**: High-quality blur or solid mask redaction
+- **� Smart Redaction Modes**: Choose between synthetic data replacement, high-quality blur, or solid mask redaction
 - **📱 Real-time Settings**: Change detection types, OCR engines, blur strength on-the-fly
 - **� Flexible Output**: Download as individual images, ZIP archive, or reconstructed PDF
 - **🖥️ User-Friendly Web UI**: Streamlit interface with progress tracking and session management
@@ -36,6 +36,26 @@ This project was developed by:
 - **💳 PAN cards**: `ABCDE1234F` (Indian tax ID format)
 - **✍️ Signatures**: Visual detection (experimental)
 - **📷 Photos/Faces**: Visual detection (experimental)
+
+## 🎭 Redaction Modes
+
+**Blurify** offers three powerful redaction modes to suit different privacy needs:
+
+### 🔄 **Synthetic Replacement** (Recommended)
+Replaces detected PII with realistic fake data while preserving document readability:
+- **Names**: `Chirag Agrawal` → `Priya Kumar`
+- **Emails**: `user@company.com` → `xyz123@gmail.com`
+- **Phones**: `+91 98765 43210` → `+91 87654 32109`
+- **Dates**: `15/03/1990` → `23/07/1985`
+- **IDs**: `ABCDE1234F` → `XYZPQ5678R`
+
+*Perfect for document sharing, testing, and compliance while maintaining natural appearance*
+
+### 🌫️ **Blur Redaction**
+Applies Gaussian blur to sensitive regions - traditional and reliable
+
+### ⬛ **Mask Redaction**  
+Covers PII with solid color blocks - maximum privacy assurance
 
 ## 🚀 Quick Start
 
@@ -328,6 +348,7 @@ Contributions welcome! Please:
 ## � Recent Improvements
 
 ### Version 2.0 Updates
+- **🎭 Synthetic Data Replacement**: NEW! Replace PII with realistic fake data instead of blurring - maintain document readability while ensuring privacy
 - **🧠 Smart Memory Management**: Automatic system memory detection with graceful fallbacks for spaCy NLP models
 - **⚡ Real-time Settings**: Configuration changes now apply immediately without restart - OCR engine switching, PII toggles work instantly  
 - **🔍 Enhanced OCR Quality**: Smart image preprocessing with CLAHE contrast enhancement, denoising, and sharpening for better text detection
